@@ -176,7 +176,7 @@ async function xanoAuth(
 		});
 		if (meRes.ok) {
 			const me = await meRes.json();
-			creditsRemaining = Number(me?.credits_remaining ?? me?.creditsLeft ?? 1);
+			creditsRemaining = Number(me?.credits_remaining ?? me?.creditsLeft ?? 2);
 		}
 	} catch {
 		creditsRemaining = 10;
@@ -283,6 +283,7 @@ export default function ApiCompatibilityTool() {
 	const [agreedToTerms, setAgreedToTerms] = useState(false);
 	const [showContactModal, setShowContactModal] = useState(false);
 	const [showEmailServiceModal, setShowEmailServiceModal] = useState(false);
+	const [hasTriedToRun, setHasTriedToRun] = useLocalStorageBoolean("api-compat-hasTriedToRun", false);
 
 	const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
 	const [hasUnlimited, setHasUnlimited] = useLocalStorageBoolean(LS_KEYS.unlimited, false);
@@ -298,12 +299,12 @@ export default function ApiCompatibilityTool() {
 					});
 					if (meRes.ok) {
 						const me = await meRes.json();
-						setRemainingCredits(Number(me?.credits_remaining ?? me?.creditsLeft ?? 1));
+						setRemainingCredits(Number(me?.credits_remaining ?? me?.creditsLeft ?? 2));
 					} else {
-						setRemainingCredits(1);
+						setRemainingCredits(2);
 					}
 				} catch {
-					setRemainingCredits(1);
+					setRemainingCredits(2);
 				}
 			})();
 		}
@@ -317,12 +318,12 @@ export default function ApiCompatibilityTool() {
 	}, [providerUrl, consumerUrl, userCurl, failureReason, caseType]);
 
 	const shouldGateOnAuthOrPayment = useMemo(() => {
-		if (freeRemaining > 0) return false;
+		if (freeRemaining > 0 && hasTriedToRun) return false;
 		if (!isAuthenticated) return true;
 		if (hasUnlimited) return false;
 		if (remainingCredits == null) return false;
 		return remainingCredits <= 0;
-	}, [freeRemaining, isAuthenticated, hasUnlimited, remainingCredits]);
+	}, [freeRemaining, isAuthenticated, hasUnlimited, remainingCredits, hasTriedToRun]);
 
 	const webhookUrl = useMemo(() => {
 		if (caseType === "A") return "/api/zap/a";
@@ -394,14 +395,23 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		setResult(null);
 		if (!canSubmit) return;
 
-		if (freeRemaining <= 0) {
-			if (!isAuthenticated) {
-				setShowAuthModal(true);
-				return;
-			}
-			if (!hasUnlimited && (remainingCredits ?? 0) <= 0) {
-				return; // PayPal section visible below
-			}
+		// Mark that user has tried to run a check
+		setHasTriedToRun(true);
+
+		// Require login on first attempt
+		if (!hasTriedToRun && !isAuthenticated) {
+			setShowAuthModal(true);
+			return;
+		}
+
+		// Check authentication and credits
+		if (!isAuthenticated) {
+			setShowAuthModal(true);
+			return;
+		}
+		
+		if (freeRemaining <= 0 && !hasUnlimited && (remainingCredits ?? 0) <= 0) {
+			return; // PayPal section visible below
 		}
 
 		setIsSubmitting(true);
@@ -644,10 +654,13 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 					}
 				}, intervalMs);
 			}
-			if (freeRemaining > 0) {
-				setFreeUsed(freeUsed + 1);
-			} else if (isAuthenticated && !hasUnlimited && (remainingCredits ?? 0) > 0) {
+			// Deduct credits based on what's available
+			if (isAuthenticated && !hasUnlimited && (remainingCredits ?? 0) > 0) {
+				// User is authenticated, deduct from their credits
 				setRemainingCredits((prev) => (prev == null ? null : Math.max(prev - 1, 0)));
+			} else if (freeRemaining > 0) {
+				// Fallback to free credits if not authenticated
+				setFreeUsed(freeUsed + 1);
 			}
 		} catch (e: any) {
 			setError(e?.message || "Something went wrong");
@@ -656,7 +669,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		} finally {
 			setIsSubmitting(false);
 		}
-	}, [canSubmit, freeRemaining, isAuthenticated, hasUnlimited, remainingCredits, webhookUrl, buildPayload, setFreeUsed, freeUsed]);
+	}, [canSubmit, freeRemaining, isAuthenticated, hasUnlimited, remainingCredits, webhookUrl, buildPayload, setFreeUsed, freeUsed, hasTriedToRun, setHasTriedToRun]);
 
 	const handleAuth = useCallback(async () => {
 		setAuthError(null);
@@ -672,7 +685,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		try {
 			const { token, creditsRemaining } = await xanoAuth(authMode, authEmail, authPassword, authName);
 			setAuthToken(token);
-			setRemainingCredits(creditsRemaining ?? 1);
+			setRemainingCredits(creditsRemaining ?? 2);
 			setShowAuthModal(false);
 		} catch (e: any) {
 			setAuthError(e?.message || "Auth failed");
@@ -693,7 +706,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		try {
 			const { token, creditsRemaining } = await xanoAuth(authMode, authEmail, authPassword, authName);
 			setAuthToken(token);
-			setRemainingCredits(creditsRemaining ?? 1);
+			setRemainingCredits(creditsRemaining ?? 2);
 			setShowAuthModal(false);
 		} catch (e: any) {
 			setAuthError(e?.message || "Auth failed");
@@ -766,7 +779,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 						>
 							Contact us
 						</button>
-						{freeRemaining > 0 ? (
+						{freeRemaining > 0 && hasTriedToRun ? (
 							<span>
 								<strong>{freeRemaining}</strong> free {freeRemaining === 1 ? "request" : "requests"} left
 							</span>
