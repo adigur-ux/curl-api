@@ -5,7 +5,7 @@ const nextConfig = {
       return [
         {
           source: "/api/zap/:path*",
-          destination: "https://healapi.vercel.app/api/zap/:path*",
+          destination: "https://curl-api-zeta.vercel.app/:path*",
         },
       ];
     }
