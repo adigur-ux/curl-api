@@ -9,6 +9,7 @@
     "start": "next start -p 3001"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.5.0",
     "next": "latest",
     "react": "18",
     "react-dom": "18"
@@ -22,11 +23,3 @@
     "typescript": "*"
   }
 }
-
-
-
-
-
-
-
-
