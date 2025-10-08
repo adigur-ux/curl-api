@@ -4,6 +4,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 type CaseType = "A" | "B" | "C";
 
+type Package = {
+	id: number;
+	name: string;
+	credits: number;
+	description: string;
+	price_usd: number;
+	sort_order: number;
+};
+
+type PackagesResponse = {
+	packages: Package[];
+};
+
 type ZapierResponse = {
 	summary: string;
 	issues: string[];
@@ -26,6 +39,7 @@ const XANO_BASE_URL = process.env.NEXT_PUBLIC_XANO_BASE_URL || "https://x8ki-let
 const XANO_LOGIN_PATH = "/auth/login";
 const XANO_SIGNUP_PATH = "/auth/signup";
 const XANO_ME_PATH = "/auth/me";
+const XANO_PACKAGES_PATH = "https://x8ki-letl-twmt.n7.xano.io/api:RMcckRv2/Package"; // You'll need to fill this endpoint manually
 
 const FREE_TRIAL_REQUESTS = Number(process.env.NEXT_PUBLIC_FREE_TRIAL_REQUESTS || 1);
 
@@ -169,19 +183,7 @@ async function xanoAuth(
 	if (!token) {
 		throw new Error("No token returned by Xano");
 	}
-	let creditsRemaining: number | null = null;
-	try {
-		const meRes = await fetch(`${XANO_BASE_URL}${XANO_ME_PATH}`, {
-			headers: { Authorization: `Bearer ${token}` },
-		});
-		if (meRes.ok) {
-			const me = await meRes.json();
-			creditsRemaining = Number(me?.credits_remaining ?? me?.creditsLeft ?? 2);
-		}
-	} catch {
-		creditsRemaining = 10;
-	}
-	return { token, creditsRemaining };
+	return { token, creditsRemaining: null };
 }
 
 function useLocalStorageNumber(key: string, defaultValue: number) {
@@ -219,17 +221,19 @@ function useLocalStorageString(key: string, defaultValue: string) {
 	return [value, setValue] as const;
 }
 
-function usePayPalButtons(options: { clientId: string; planId?: string }) {
+function usePayPalButtons(options: { clientId: string; planId?: string; enableButtons?: boolean; onApprove?: () => void; selectedPackage?: Package | null }) {
 	const [isReady, setIsReady] = useState(false);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
 		if (!options.clientId) return;
+		
 		const existing = document.querySelector<HTMLScriptElement>("script#paypal-sdk");
 		if (existing) {
 			setIsReady(true);
 			return;
 		}
+		
 		const script = document.createElement("script");
 		script.id = "paypal-sdk";
 		const base = "https://www.paypal.com/sdk/js";
@@ -244,6 +248,80 @@ function usePayPalButtons(options: { clientId: string; planId?: string }) {
 		script.onload = () => setIsReady(true);
 		document.body.appendChild(script);
 	}, [options.clientId, options.planId]);
+
+	useEffect(() => {
+		if (!options.enableButtons || !isReady || !containerRef.current) return;
+		
+		const container = containerRef.current;
+		container.innerHTML = "";
+		const w = window as any;
+		
+		if (!w.paypal?.Buttons) return;
+		
+		const buttons = w.paypal.Buttons({
+			style: { layout: "vertical", color: "gold", shape: "rect", label: "subscribe" },
+			createSubscription: options.planId
+				? function (data: any, actions: any) {
+					return actions.subscription.create({ plan_id: options.planId });
+				}
+				: undefined,
+			createOrder: !options.planId
+				? function (_data: any, actions: any) {
+					const price = options.selectedPackage?.price_usd?.toFixed(2) || "5.00";
+					return actions.order.create({ purchase_units: [{ amount: { value: price } }] });
+				}
+				: undefined,
+			onApprove: function (data: any, actions: any) {
+				return actions.order.capture().then(async function (details: any) {
+					console.log('PayPal order captured:', details);
+					
+					// Extract transaction data from PayPal details
+					const orderId = details.id;
+					const priceUsd = parseFloat(details.purchase_units[0]?.payments?.captures[0]?.amount?.value || '0');
+					const status = details.status;
+					const email = details.payer?.email_address || '';
+					
+					// Get package info from selected package
+					const packageId = options.selectedPackage?.id || 0;
+					const credits = options.selectedPackage?.credits || 0;
+					
+					// Call Xano transaction API
+					try {
+						const response = await fetch('https://x8ki-letl-twmt.n7.xano.io/api:RMcckRv2/Transaction', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+							},
+							body: JSON.stringify({
+								order_id: orderId,
+								price_usd: priceUsd,
+								package_id: packageId,
+								credits: credits,
+								status: status,
+								email: email
+							})
+						});
+						
+						if (response.ok) {
+							console.log('Transaction recorded in Xano successfully');
+							// Refresh the page to fetch updated daily quota
+							window.location.reload();
+						} else {
+							console.error('Failed to record transaction in Xano:', response.statusText);
+						}
+					} catch (error) {
+						console.error('Error calling Xano transaction API:', error);
+					}
+				});
+			},
+		});
+		buttons.render(container);
+		return () => {
+			try {
+				buttons.close();
+			} catch {}
+		};
+	}, [isReady, containerRef.current, options.enableButtons, options.clientId, options.planId, options.onApprove, options.selectedPackage]);
 
 	return { isReady, containerRef } as const;
 }
@@ -275,10 +353,12 @@ export default function ApiCompatibilityTool() {
 	const [showAuthModal, setShowAuthModal] = useState(false);
 	const [authMode, setAuthMode] = useState<AuthMode>("login");
 	const [authName, setAuthName] = useState("");
-	const [authEmail, setAuthEmail] = useState("");
+	// Replace authEmail state with localStorage-backed version
+	const [authEmail, setAuthEmail] = useLocalStorageString('api-compat-authEmail', "");
 	const [authPassword, setAuthPassword] = useState("");
 	const [isAuthLoading, setIsAuthLoading] = useState(false);
 	const [authError, setAuthError] = useState<string | null>(null);
+	const [authNotice, setAuthNotice] = useState<string | null>(null);
 	const [showTermsModal, setShowTermsModal] = useState(false);
 	const [agreedToTerms, setAgreedToTerms] = useState(false);
 	const [showContactModal, setShowContactModal] = useState(false);
@@ -288,27 +368,161 @@ export default function ApiCompatibilityTool() {
 	const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
 	const [hasUnlimited, setHasUnlimited] = useLocalStorageBoolean(LS_KEYS.unlimited, false);
 
-	const paypal = usePayPalButtons({ clientId: PAYPAL_CLIENT_ID_SANDBOX, planId: PAYPAL_PLAN_ID || undefined });
+	// Package selection state
+	const [packages, setPackages] = useState<Package[]>([]);
+	const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+	const [showPackageModal, setShowPackageModal] = useState(false);
+	const [isLoadingPackages, setIsLoadingPackages] = useState(false);
+	const [showPolicyModal, setShowPolicyModal] = useState(false);
+	const [showProviderTooltip, setShowProviderTooltip] = useState(false);
+	const [showConsumerTooltip, setShowConsumerTooltip] = useState(false);
 
-	useEffect(() => {
-		if (isAuthenticated && remainingCredits == null && !hasUnlimited) {
-			(async () => {
-				try {
-					const meRes = await fetch(`${XANO_BASE_URL}${XANO_ME_PATH}`, {
-						headers: { Authorization: `Bearer ${authToken}` },
-					});
-					if (meRes.ok) {
-						const me = await meRes.json();
-						setRemainingCredits(Number(me?.credits_remaining ?? me?.creditsLeft ?? 2));
-					} else {
-						setRemainingCredits(2);
-					}
-				} catch {
-					setRemainingCredits(2);
-				}
-			})();
+	// Add a constant for inactivity timeout (1 hour)
+	const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+	const LS_LAST_ACTIVE = 'api-compat-lastActive';
+
+	// Helper to update last active timestamp
+	function updateLastActive() {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem(LS_LAST_ACTIVE, Date.now().toString());
 		}
-	}, [isAuthenticated, remainingCredits, hasUnlimited, authToken]);
+	}
+
+	// Helper to check if session is expired
+	function isSessionExpired() {
+		if (typeof window === 'undefined') return true;
+		const lastActive = localStorage.getItem(LS_LAST_ACTIVE);
+		if (!lastActive) return true;
+		return Date.now() - Number(lastActive) > INACTIVITY_TIMEOUT_MS;
+	}
+
+	// On mount, check for session expiration
+	useEffect(() => {
+		if (isAuthenticated && isSessionExpired()) {
+			// Session expired, force logout
+			setAuthToken("");
+			setAuthEmail("");
+			setShowAuthModal(true);
+		}
+		// If not authenticated, show login modal
+		if (!isAuthenticated) {
+			setShowAuthModal(true);
+		}
+	}, []); // Only run on mount
+
+	// Function to fetch credits from Xano
+	const fetchCreditsFromXano = async () => {
+		updateLastActive();
+		if (!isAuthenticated || !authToken || !authEmail) {
+			return;
+		}
+		try {
+			const response = await fetch(`${XANO_BASE_URL}/auth/me_quota?email=${encodeURIComponent(authEmail)}`, {
+				method: 'GET',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${authToken}`
+				}
+			});
+			if (response.ok) {
+				const data = await response.json();
+				// Handle response: {"daily_quota":[{"daily_quota":2}]}
+				if (Array.isArray(data.daily_quota) && data.daily_quota.length > 0 && typeof data.daily_quota[0].daily_quota === 'number') {
+					setRemainingCredits(data.daily_quota[0].daily_quota);
+				}
+			}
+		} catch (error) {
+			// handle error
+		}
+	};
+
+	// Function to update credits in Xano
+	const updateCreditsInXano = async (newCreditCount: number) => {
+		updateLastActive();
+		if (!isAuthenticated || !authToken) {
+			console.log('Cannot update credits: not authenticated or no token');
+			return;
+		}
+		
+		try {
+			console.log('Updating credits in Xano:', newCreditCount);
+			const response = await fetch(`${XANO_BASE_URL}${XANO_ME_PATH}`, {
+				method: 'POST',
+				headers: { 
+					'Authorization': `Bearer ${authToken}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ daily_quota: newCreditCount })
+			});
+			
+			if (response.ok) {
+				const result = await response.json();
+				console.log('Credits updated in Xano successfully:', result);
+				
+				// Update the local state with the returned value
+				if (result.user?.daily_quota !== undefined) {
+					const credits = Number(result.user.daily_quota);
+					if (!isNaN(credits)) {
+						// Only update if the value is different from what we expect
+						if (credits !== newCreditCount) {
+							setRemainingCredits(credits);
+						}
+					} else {
+						console.error('Invalid daily_quota value from Xano:', result.user.daily_quota);
+						setRemainingCredits(2); // Fallback to default
+					}
+				} else {
+					console.log('No daily_quota in response, keeping current value');
+				}
+			} else {
+				const errorText = await response.text();
+				console.error('Failed to update credits in Xano:', response.status, response.statusText, errorText);
+			}
+		} catch (error) {
+			console.error('Error updating credits in Xano:', error);
+		}
+	};
+
+	const fetchQuotaFromXano = async (email: string) => {
+		try {
+			const response = await fetch(`${XANO_BASE_URL}/auth/me_quota`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ email }),
+			});
+			if (response.ok) {
+				const data = await response.json();
+				if (typeof data.daily_quota === 'number') {
+					setRemainingCredits(data.daily_quota);
+				}
+			}
+		} catch (err) {
+			console.error('Failed to fetch daily_quota from Xano', err);
+		}
+	};
+
+	// Function to fetch packages from Xano
+	const fetchPackagesFromXano = async () => {
+		setIsLoadingPackages(true);
+		try {
+			const response = await fetch(XANO_PACKAGES_PATH, {
+				method: 'GET',
+				headers: { 'Content-Type': 'application/json' }
+			});
+			if (response.ok) {
+				const data: PackagesResponse = await response.json();
+				// Sort packages by sort_order field
+				const sortedPackages = data.packages.sort((a, b) => a.sort_order - b.sort_order);
+				setPackages(sortedPackages);
+			} else {
+				console.error('Failed to fetch packages from Xano');
+			}
+		} catch (err) {
+			console.error('Error fetching packages from Xano', err);
+		} finally {
+			setIsLoadingPackages(false);
+		}
+	};
 
 	const canSubmit = useMemo(() => {
 		if (!providerUrl || !consumerUrl) return false;
@@ -325,11 +539,20 @@ export default function ApiCompatibilityTool() {
 		return remainingCredits <= 0;
 	}, [freeRemaining, isAuthenticated, hasUnlimited, remainingCredits, hasTriedToRun]);
 
+	const paypal = usePayPalButtons({ 
+		clientId: PAYPAL_CLIENT_ID_SANDBOX, 
+		planId: PAYPAL_PLAN_ID || undefined,
+		enableButtons: shouldGateOnAuthOrPayment && isAuthenticated && !hasUnlimited && !!selectedPackage,
+		onApprove: () => setHasUnlimited(true),
+		selectedPackage: selectedPackage
+	});
+
 	const webhookUrl = useMemo(() => {
 		if (caseType === "A") return "/api/zap/a";
 		if (caseType === "B") return "/api/zap/b";
 		return "/api/zap/c";
 	}, [caseType]);
+
 
 	const extractCurlString = useCallback((payload: any): string | null => {
 		try {
@@ -655,9 +878,15 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 				}, intervalMs);
 			}
 			// Deduct credits based on what's available
-			if (isAuthenticated && !hasUnlimited && (remainingCredits ?? 0) > 0) {
+			if (isAuthenticated && !hasUnlimited && remainingCredits !== null && remainingCredits > 0) {
 				// User is authenticated, deduct from their credits
-				setRemainingCredits((prev) => (prev == null ? null : Math.max(prev - 1, 0)));
+				const newCreditCount = remainingCredits - 1;
+				
+				// Update local state immediately for better UX
+				setRemainingCredits(newCreditCount);
+				
+				// Update credits in Xano
+				await updateCreditsInXano(newCreditCount);
 			} else if (freeRemaining > 0) {
 				// Fallback to free credits if not authenticated
 				setFreeUsed(freeUsed + 1);
@@ -673,6 +902,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 
 	const handleAuth = useCallback(async () => {
 		setAuthError(null);
+		setAuthNotice(null);
 		
 		// Show terms modal for signup
 		if (authMode === "signup") {
@@ -680,12 +910,14 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 			return;
 		}
 		
-		// Proceed with login directly
 		setIsAuthLoading(true);
 		try {
-			const { token, creditsRemaining } = await xanoAuth(authMode, authEmail, authPassword, authName);
+			const { token } = await xanoAuth(authMode, authEmail, authPassword, authName);
+			console.log(`🔐 LOGIN SUCCESS: token=${!!token}`);
 			setAuthToken(token);
-			setRemainingCredits(creditsRemaining ?? 2);
+			setAuthEmail(authEmail); // Persist email on login
+			updateLastActive(); // Update last active on successful login
+			// Credits will be fetched by useEffect after authentication
 			setShowAuthModal(false);
 		} catch (e: any) {
 			setAuthError(e?.message || "Auth failed");
@@ -696,7 +928,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		} finally {
 			setIsAuthLoading(false);
 		}
-	}, [authMode, authEmail, authPassword, authName, setAuthToken]);
+	}, [authMode, authEmail, authPassword, authName, setAuthToken, setAuthEmail]);
 
 	const handleTermsAgreement = useCallback(async () => {
 		if (!agreedToTerms) return;
@@ -704,10 +936,17 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		setShowTermsModal(false);
 		setIsAuthLoading(true);
 		try {
-			const { token, creditsRemaining } = await xanoAuth(authMode, authEmail, authPassword, authName);
-			setAuthToken(token);
-			setRemainingCredits(creditsRemaining ?? 2);
+			const { token } = await xanoAuth(authMode, authEmail, authPassword, authName);
+			console.log(`🔐 SIGNUP SUCCESS: token received=${!!token}`);
+			// Do NOT authenticate on signup; require explicit login afterwards
+			setAuthNotice(null);
 			setShowAuthModal(false);
+			setAuthMode("login");
+			setAuthPassword("");
+			// Redirect user to dedicated login page with reminder flag
+			if (typeof window !== "undefined") {
+				window.location.href = "/login?signup=1";
+			}
 		} catch (e: any) {
 			setAuthError(e?.message || "Auth failed");
 			// Show contact modal for authentication errors
@@ -720,37 +959,18 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 	}, [agreedToTerms, authMode, authEmail, authPassword, authName, setAuthToken]);
 
 	useEffect(() => {
-		if (!paypal.isReady || !paypal.containerRef.current) return;
-		const container = paypal.containerRef.current;
-		container.innerHTML = "";
-		const w = window as any;
-		if (!w.paypal?.Buttons) return;
-		const buttons = w.paypal.Buttons({
-			style: { layout: "vertical", color: "gold", shape: "rect", label: "subscribe" },
-			createSubscription: PAYPAL_PLAN_ID
-				? function (data: any, actions: any) {
-					return actions.subscription.create({ plan_id: PAYPAL_PLAN_ID });
-				}
-				: undefined,
-			createOrder: !PAYPAL_PLAN_ID
-				? function (_data: any, actions: any) {
-					return actions.order.create({ purchase_units: [{ amount: { value: "5.00" } }] });
-				}
-				: undefined,
-			onApprove: function () {
-				setHasUnlimited(true);
-			},
-			onError: function () {
-				// No-op
-			},
-		});
-		buttons.render(container);
-		return () => {
-			try {
-				buttons.close();
-			} catch {}
-		};
-	}, [paypal.isReady, paypal.containerRef, setHasUnlimited]);
+		console.log('useEffect: isAuthenticated', isAuthenticated, 'authEmail', authEmail);
+		if (isAuthenticated && authEmail) {
+			fetchCreditsFromXano();
+		}
+		// Optionally, you could refetch on every mount or login
+	}, [isAuthenticated, authEmail]);
+
+	// Fetch packages on component mount
+	useEffect(() => {
+		fetchPackagesFromXano();
+	}, []);
+
 
 	if (!mounted) return null;
 
@@ -779,11 +999,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 						>
 							Contact us
 						</button>
-						{freeRemaining > 0 && hasTriedToRun ? (
-							<span>
-								<strong>{freeRemaining}</strong> free {freeRemaining === 1 ? "request" : "requests"} left
-							</span>
-						) : isAuthenticated ? (
+					{isAuthenticated ? (
 							<span className="inline-flex items-center gap-2">
 								{hasUnlimited ? (
 									<span className="text-emerald-600 font-medium">Unlimited active</span>
@@ -793,7 +1009,11 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 									</span>
 								)}
 							</span>
-						) : (
+					) : freeRemaining > 0 && hasTriedToRun ? (
+						<span>
+							<strong>{freeRemaining}</strong> free {freeRemaining === 1 ? "request" : "requests"} left
+						</span>
+					) : (
 							<button
 								onClick={() => setShowAuthModal(true)}
 								className="rounded-md bg-indigo-600 px-3 py-1.5 text-white shadow hover:bg-indigo-700"
@@ -824,7 +1044,25 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 
 					<div className="grid gap-4">
 						<label className="block">
-							<span className="mb-1 block text-sm font-medium text-gray-700">Provider URL</span>
+							<div className="mb-1 flex items-center gap-2">
+								<span className="text-sm font-medium text-gray-700">Provider URL</span>
+								<div className="relative">
+									<button
+										type="button"
+										onMouseEnter={() => setShowProviderTooltip(true)}
+										onMouseLeave={() => setShowProviderTooltip(false)}
+										className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400 text-xs text-white hover:bg-gray-500"
+									>
+										?
+									</button>
+									{showProviderTooltip && (
+										<div className="absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 transform rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+											This is the source endpoint - where your data comes from. For example, your backend API or database endpoint.
+											<div className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+										</div>
+									)}
+								</div>
+							</div>
 							<input
 								type="url"
 								value={providerUrl}
@@ -836,7 +1074,25 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 						</label>
 
 						<label className="block">
-							<span className="mb-1 block text-sm font-medium text-gray-700">Consumer URL</span>
+							<div className="mb-1 flex items-center gap-2">
+								<span className="text-sm font-medium text-gray-700">Consumer URL</span>
+								<div className="relative">
+									<button
+										type="button"
+										onMouseEnter={() => setShowConsumerTooltip(true)}
+										onMouseLeave={() => setShowConsumerTooltip(false)}
+										className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400 text-xs text-white hover:bg-gray-500"
+									>
+										?
+									</button>
+									{showConsumerTooltip && (
+										<div className="absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 transform rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+											This is the target endpoint - where the data is sent to or consumed. For example, your client API, webhook or integration endpoint.
+											<div className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+										</div>
+									)}
+								</div>
+							</div>
 							<input
 								type="url"
 								value={consumerUrl}
@@ -927,8 +1183,41 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 										<span>Unlimited active.</span>
 									) : (
 										<div className="flex flex-col gap-3">
-											<span>Purchase subscription to unlock unlimited requests:</span>
-											<div ref={paypal.containerRef} className="pt-1" />
+											<span>Purchase credits to continue:</span>
+											{!selectedPackage ? (
+												<button
+													onClick={() => setShowPackageModal(true)}
+													className="rounded-md bg-indigo-600 px-4 py-2 text-white shadow hover:bg-indigo-700"
+												>
+													Choose Package
+												</button>
+											) : (
+												<div className="space-y-3">
+													<div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+														<div className="font-medium text-gray-800">{selectedPackage.name}</div>
+														<div className="text-sm text-gray-600">{selectedPackage.description}</div>
+														<div className="text-sm text-gray-600">{selectedPackage.credits} credits</div>
+														<div className="font-semibold text-indigo-600">${selectedPackage.price_usd}</div>
+													</div>
+													<div className="flex gap-2">
+														<button
+															onClick={() => setShowPackageModal(true)}
+															className="rounded-md bg-gray-600 px-3 py-1.5 text-white shadow hover:bg-gray-700"
+														>
+															Change Package
+														</button>
+														<div className="flex-1">
+															<div 
+																ref={paypal.containerRef}
+																className="pt-1" 
+															/>
+															{!paypal.isReady && (
+																<div className="text-xs text-gray-500">PayPal loading...</div>
+															)}
+														</div>
+													</div>
+												</div>
+											)}
 										</div>
 									)}
 								</div>
@@ -1090,7 +1379,8 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 										required
 									/>
 								</label>
-								{authError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{authError}</div>}
+				{authError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{authError}</div>}
+				{authNotice && <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">{authNotice}</div>}
 								<button
 									onClick={handleAuth}
 									disabled={isAuthLoading || !authEmail || !authPassword || (authMode === "signup" && !authName)}
@@ -1268,7 +1558,147 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 						</div>
 					</div>
 				)}
+
+				{showPackageModal && (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+						<div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-lg">
+							<div className="mb-4 flex items-center justify-between">
+								<div className="flex items-center space-x-3">
+									<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-purple-600 shadow-md">
+										<svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+										</svg>
+									</div>
+									<h3 className="text-lg font-semibold text-gray-800">Choose Your Package</h3>
+								</div>
+								<button 
+									onClick={() => setShowPackageModal(false)} 
+									className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+								>
+									✕
+								</button>
+							</div>
+							
+							{isLoadingPackages ? (
+								<div className="flex items-center justify-center py-8">
+									<div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-b-transparent"></div>
+									<span className="ml-3 text-gray-600">Loading packages...</span>
+								</div>
+							) : packages.length === 0 ? (
+								<div className="text-center py-8 text-gray-600">
+									No packages available at the moment.
+								</div>
+							) : (
+								<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+									{packages.map((pkg) => (
+										<div
+											key={pkg.name}
+											onClick={() => {
+												setSelectedPackage(pkg);
+												setShowPackageModal(false);
+											}}
+											className={`cursor-pointer rounded-lg border p-4 transition-all hover:shadow-md ${
+												selectedPackage?.name === pkg.name
+													? 'border-indigo-500 bg-indigo-50'
+													: 'border-gray-200 bg-white hover:border-gray-300'
+											}`}
+										>
+											<div className="mb-2">
+												<h4 className="font-semibold text-gray-800">{pkg.name}</h4>
+												<p className="text-sm text-gray-600">{pkg.description}</p>
+											</div>
+											<div className="mb-3">
+												<div className="text-lg font-bold text-indigo-600">${pkg.price_usd}</div>
+												<div className="text-sm text-gray-500">{pkg.credits} credits</div>
+											</div>
+											<button
+												className={`w-full rounded-md px-3 py-2 text-sm font-medium ${
+													selectedPackage?.name === pkg.name
+														? 'bg-indigo-600 text-white'
+														: 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+												}`}
+											>
+												{selectedPackage?.name === pkg.name ? 'Selected' : 'Select'}
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+							
+							<div className="mt-6 flex justify-end">
+								<button
+									onClick={() => setShowPackageModal(false)}
+									className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					</div>
+				)}
+
+				{/* Footer with Policy Links */}
+				<div className="mt-8 text-center">
+					<button
+						onClick={() => setShowPolicyModal(true)}
+						className="text-sm text-gray-500 hover:text-gray-700 underline"
+					>
+						Privacy Policy / Terms & Conditions / Accessibility Statement / Refund Policy
+					</button>
+				</div>
 			</div>
+
+			{/* Policy Modal */}
+			{showPolicyModal && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">
+						<div className="mb-4 flex items-center justify-between">
+							<div className="flex items-center space-x-3">
+								<div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-purple-600">
+									<svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+									</svg>
+								</div>
+								<h3 className="text-lg font-semibold text-gray-800">Legal Documents</h3>
+							</div>
+							<button 
+								onClick={() => setShowPolicyModal(false)} 
+								className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+							>
+								✕
+							</button>
+						</div>
+						
+						<div className="mb-6 text-sm text-gray-700">
+							<p className="mb-3">
+								To view our Privacy Policy, Terms & Conditions, Accessibility Statement, and Refund Policy, 
+								please visit our main website and scroll to the bottom of the page.
+							</p>
+							<p className="mb-4">
+								The documents are located at the bottom of the page after clicking the link below.
+							</p>
+						</div>
+						
+						<div className="flex gap-3">
+							<button
+								onClick={() => {
+									setShowPolicyModal(false);
+									window.open('https://www.heal-api.net/', '_blank');
+								}}
+								className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700"
+							>
+								Visit Website
+							</button>
+							<button
+								onClick={() => setShowPolicyModal(false)}
+								className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
