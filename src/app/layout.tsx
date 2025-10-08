@@ -1,5 +1,6 @@
 import "./globals.css";
 import React from "react";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata = {
   title: "Dr Curl - API Compatibility Checker",
