@@ -239,6 +239,7 @@ function usePayPalButtons(options: { clientId: string; planId?: string; enableBu
 		const base = "https://www.paypal.com/sdk/js";
 		const params = new URLSearchParams({
 			"client-id": options.clientId,
+			components: "buttons",
 			currency: "USD",
 			intent: options.planId ? "subscription" : "capture",
 			vault: options.planId ? "true" : "false",
