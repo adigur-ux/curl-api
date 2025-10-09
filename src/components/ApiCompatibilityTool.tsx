@@ -242,6 +242,8 @@ function usePayPalButtons(options: { clientId: string; planId?: string; enableBu
 			currency: "USD",
 			intent: options.planId ? "subscription" : "capture",
 			vault: options.planId ? "true" : "false",
+			locale: "he_IL",
+			countryCode: "IL",
 		});
 		script.src = `${base}?${params.toString()}`;
 		script.async = true;
@@ -543,7 +545,6 @@ export default function ApiCompatibilityTool() {
 		clientId: PAYPAL_CLIENT_ID_SANDBOX, 
 		planId: PAYPAL_PLAN_ID || undefined,
 		enableButtons: shouldGateOnAuthOrPayment && isAuthenticated && !hasUnlimited && !!selectedPackage,
-		onApprove: () => setHasUnlimited(true),
 		selectedPackage: selectedPackage
 	});
 
