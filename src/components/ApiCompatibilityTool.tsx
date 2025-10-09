@@ -244,7 +244,6 @@ function usePayPalButtons(options: { clientId: string; planId?: string; enableBu
 			intent: options.planId ? "subscription" : "capture",
 			vault: options.planId ? "true" : "false",
 			locale: "he_IL",
-			"buyer-country": "IL",
 		});
 		script.src = `${base}?${params.toString()}`;
 		script.async = true;
