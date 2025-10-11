@@ -1,0 +1,10 @@
+# robots.txt for Heal-API.com
+# Allow search engines to index the public site but block admin or API routes
+
+User-agent: *
+Disallow: /api/
+Disallow: /admin/
+Allow: /
+
+# Make sure Google can see your favicon
+Allow: /favicon.ico
