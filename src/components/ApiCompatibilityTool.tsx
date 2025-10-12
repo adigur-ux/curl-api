@@ -33,7 +33,7 @@ type ZapierResponse = {
  */
 const ZAP_A_WEBHOOK_URL = process.env.NEXT_PUBLIC_ZAP_A_WEBHOOK_URL || "https://hooks.zapier.com/hooks/catch/20378221/u1j9fqy/";
 const ZAP_B_WEBHOOK_URL = process.env.NEXT_PUBLIC_ZAP_B_WEBHOOK_URL || "https://hooks.zapier.com/hooks/catch/20378221/u9bxdj0/";
-const ZAP_C_WEBHOOK_URL = process.env.NEXT_PUBLIC_ZAP_C_WEBHOOK_URL || "https://hooks.zapier.com/hooks/catch/20378221/u94tkdy/";
+const ZAP_C_WEBHOOK_URL = process.env.NEXT_PUBLIC_ZAP_C_WEBHOOK_URL || "https://hooks.zapier.com/hooks/catch/20378221/u9mt13t/";
 
 const XANO_BASE_URL = process.env.NEXT_PUBLIC_XANO_BASE_URL || "https://x8ki-letl-twmt.n7.xano.io/api:oNjZ-H43";
 const XANO_LOGIN_PATH = "/auth/login";
@@ -378,6 +378,8 @@ export default function ApiCompatibilityTool() {
 	const [showPolicyModal, setShowPolicyModal] = useState(false);
 	const [showProviderTooltip, setShowProviderTooltip] = useState(false);
 	const [showConsumerTooltip, setShowConsumerTooltip] = useState(false);
+	const [showCurlHelpTooltip, setShowCurlHelpTooltip] = useState(false);
+	const [showFailureReasonHelpTooltip, setShowFailureReasonHelpTooltip] = useState(false);
 
 	// Add a constant for inactivity timeout (1 hour)
 	const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
@@ -528,7 +530,7 @@ export default function ApiCompatibilityTool() {
 
 	const canSubmit = useMemo(() => {
 		if (!providerUrl || !consumerUrl) return false;
-		if (caseType !== "C" && !userCurl) return false;
+		if (caseType !== "C" && caseType !== "B" && !userCurl) return false;
 		if (caseType === "B" && !failureReason) return false;
 		return true;
 	}, [providerUrl, consumerUrl, userCurl, failureReason, caseType]);
@@ -585,10 +587,30 @@ export default function ApiCompatibilityTool() {
 
 	const displayedJson = useMemo(() => {
 		if (!result) return null;
+		// Case C: Handle both object and stringified curl_command in result.result
+		if (caseType === "C") {
+		  let curlStr: string | undefined = undefined;
+		  const res = (result as any)?.result;
+		  if (typeof res === "object" && res !== null && typeof res.curl_command === "string") {
+			curlStr = res.curl_command;
+		  } else if (typeof res === "string") {
+			try {
+			  const parsed = JSON.parse(res);
+			  if (parsed && typeof parsed.curl_command === "string") {
+				curlStr = parsed.curl_command;
+			  } else {
+				curlStr = res;
+			  }
+			} catch {
+			  curlStr = res;
+			}
+		  }
+		  return { curl_command: curlStr || "NO_CURL_COMMAND_FOUND" };
+		}
 		if (caseType === "A") {
-			const anyRes: any = result as any;
-			const fixed = result.fixed_curl || extractCurlString(anyRes) || "";
-			return { fixed_curl: fixed };
+		  const anyRes: any = result as any;
+		  const fixed = result.fixed_curl || extractCurlString(anyRes) || "";
+		  return { fixed_curl: fixed };
 		}
 		return result;
 	}, [result, caseType, extractCurlString]);
@@ -606,8 +628,10 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		}
 		if (caseType === "B") {
 			const requestId = crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-        const payload = { ...common, user_curl: userCurl, failure_reason: failureReason, callback_url: callbackUrl, request_id: requestId } as any;
-        return { payload, requestId };
+			// For B: userCurl can be null if blank
+			const userCurlOrNull = userCurl && userCurl.trim().length > 0 ? userCurl : null;
+			const payload = { ...common, user_curl: userCurlOrNull, failure_reason: failureReason, callback_url: callbackUrl, request_id: requestId } as any;
+			return { payload, requestId };
 		}
 		const requestId = crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
     const payload = { ...common, task_explanation: taskExplanation, callback_url: callbackUrl, request_id: requestId } as any;
@@ -1027,7 +1051,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 
 				<div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
 					<div className="mb-6 flex gap-2">
-						{(["A", "B", "C"] as CaseType[]).map((c) => (
+						{(["A", "B"] as CaseType[]).map((c) => (
 							<button
 								key={c}
 								onClick={() => setCaseType(c)}
@@ -1037,8 +1061,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 								)}
 							>
 								{c === "A" && "Case A: Auto-Fix Your cURL"}
-								{c === "B" && "Case B: Error Diagnosis"}
-								{c === "C" && "Case C: Beta (not working yet) Get a New cURL"}
+								{c === "B" && "Case B: Error Diagnosis/Generate cURL Request"}
 							</button>
 						))}
 					</div>
@@ -1119,31 +1142,72 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 
 						{caseType !== "C" && (
 							<label className="block">
-								<span className={classNames("mb-1 block font-medium text-gray-700", caseType === "B" ? "text-xs" : "text-sm")}>
-									Your cURL
-								</span>
+								<div className="mb-1 flex items-center gap-2">
+									<span className={classNames("block font-medium text-gray-700", caseType === "B" ? "text-xs" : "text-sm")}>Your cURL</span>
+									{(caseType === "A" || caseType === "B") && (
+										<div className="relative">
+											<button
+												type="button"
+												onMouseEnter={() => setShowCurlHelpTooltip(true)}
+												onMouseLeave={() => setShowCurlHelpTooltip(false)}
+												className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400 text-xs text-white hover:bg-gray-500"
+											>
+												?
+											</button>
+											{showCurlHelpTooltip && (
+												<div className="absolute bottom-full left-1/2 mb-2 w-72 -translate-x-1/2 transform rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg z-10">
+													Fill it only if you are getting errors in your own cURL command.
+													<div className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+												</div>
+											)}
+										</div>
+									)}
+								</div>
 								<textarea
 									value={userCurl}
 									onChange={(e) => setUserCurl(e.target.value)}
-									placeholder="curl -X POST https://api.provider.com/..."
+									placeholder={caseType === "B"
+										? "Leave this field as a blank if you want to send a cURL generation request."
+										: "curl -X POST https://api.provider.com/..."}
 									rows={caseType === "B" ? 3 : 4}
 									className={classNames(
 										"w-full rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
 										caseType === "B" ? "px-3 py-1.5 text-sm" : "px-3 py-2"
 									)}
-									required
+									required={caseType !== "B"}
 								/>
 							</label>
 						)}
 
 						{caseType === "B" && (
 							<label className="block">
-								<span className="mb-1 block text-sm font-medium text-gray-700">Failure Reason</span>
+								<div className="mb-1 flex items-center gap-2">
+									<span className="block text-sm font-medium text-gray-700">
+										Failure Reason / Generate cURL Request
+									</span>
+									<div className="relative">
+										<button
+											type="button"
+											onMouseEnter={() => setShowFailureReasonHelpTooltip(true)}
+											onMouseLeave={() => setShowFailureReasonHelpTooltip(false)}
+											className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400 text-xs text-white hover:bg-gray-500"
+										>
+											?
+										</button>
+										{showFailureReasonHelpTooltip && (
+											<div className="absolute bottom-full left-1/2 mb-2 w-80 -translate-x-1/2 transform rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg z-10">
+												If your purpose is to generate a cURL command please describe clearly what you want the new cURL to accomplish.<br/>
+												For example: Send POST request to Provider to create a new user with JSON body (name, email).
+												<div className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+											</div>
+										)}
+									</div>
+								</div>
 								<input
 									type="text"
 									value={failureReason}
 									onChange={(e) => setFailureReason(e.target.value)}
-									placeholder="Describe the error you saw"
+									placeholder="Describe the error you saw or what cURL you want to generate"
 									className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 									required
 								/>
@@ -1259,7 +1323,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 										</ul>
 									</div>
 								)}
-								{result.fixed_curl && (
+								{caseType !== "A" && result.fixed_curl && (
 									<div>
 										<div className="font-medium">Fixed cURL:</div>
 										<pre className="mt-1 overflow-auto rounded-lg bg-gray-900 p-3 text-gray-100"><code>{result.fixed_curl}</code></pre>
