@@ -76,6 +76,14 @@ function downloadTextAsFile(filename: string, content: string) {
 	URL.revokeObjectURL(url);
 }
 
+function downloadPptxTutorial() {
+	// Create a link to download the PPTX tutorial
+	const link = document.createElement("a");
+	link.href = "/tutorial.pptx"; // This will be the path to your PPTX file
+	link.download = "API_Compatibility_Tutorial.pptx";
+	link.click();
+}
+
 async function copyToClipboard(text: string) {
 	try {
 		await navigator.clipboard.writeText(text);
@@ -1015,6 +1023,15 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 						</div>
 					</div>
 					<div className="flex items-center gap-3 text-sm text-gray-600">
+						<button
+							onClick={() => {
+								console.log('Download tutorial button clicked');
+								downloadPptxTutorial();
+							}}
+							className="rounded-md bg-green-600 px-3 py-1.5 text-white shadow hover:bg-green-700"
+						>
+							📄 Download Tutorial
+						</button>
 						<button
 							onClick={() => {
 								console.log('Contact us button clicked');
