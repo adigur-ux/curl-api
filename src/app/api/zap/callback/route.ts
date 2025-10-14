@@ -92,7 +92,7 @@ export async function GET(request: Request) {
   }
   const record = memoryStore.__zapCallbackStore?.[requestId];
   if (!record) {
-    return NextResponse.json({ found: false, pending: true }, { status: 404, headers: CORS_HEADERS });
+    return NextResponse.json({ found: false, pending: true }, { status: 200, headers: CORS_HEADERS });
   }
   return NextResponse.json(
     {
@@ -107,5 +107,6 @@ export async function GET(request: Request) {
     { status: 200, headers: CORS_HEADERS }
   );
 }
+
 
 
