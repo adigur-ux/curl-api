@@ -5,9 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 export const metadata = {
   title: "Dr Curl - API Compatibility Checker",
   description: "Professional API compatibility tooling with intelligent cURL analysis and optimization",
-  icons: {
-    icon: "/favicon.ico", // your single existing favicon
-  },
+  icon: "/favicon.ico", // your single existing favicon,
   openGraph: {
     title: "Dr Curl | API Compatibility Tool",
     description:
