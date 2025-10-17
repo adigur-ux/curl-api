@@ -39,6 +39,7 @@ const XANO_BASE_URL = process.env.NEXT_PUBLIC_XANO_BASE_URL || "https://x8ki-let
 const XANO_LOGIN_PATH = "/auth/login";
 const XANO_SIGNUP_PATH = "/auth/signup";
 const XANO_ME_PATH = "/auth/me";
+const XANO_ME_PASS = "/auth/pass";
 const XANO_PACKAGES_PATH = "https://x8ki-letl-twmt.n7.xano.io/api:RMcckRv2/Package"; // You'll need to fill this endpoint manually
 
 const FREE_TRIAL_REQUESTS = Number(process.env.NEXT_PUBLIC_FREE_TRIAL_REQUESTS || 1);
@@ -1004,6 +1005,35 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 		fetchPackagesFromXano();
 	}, []);
 
+	const [showChangePassModal, setShowChangePassModal] = useState(false);
+	const [newPassword, setNewPassword] = useState("");
+	const [isPassLoading, setIsPassLoading] = useState(false);
+	const [passSuccess, setPassSuccess] = useState<string | null>(null);
+	const [passError, setPassError] = useState<string | null>(null);
+
+	// --- Password change handler ---
+	const handleChangePassword = async () => {
+	  setIsPassLoading(true);
+	  setPassSuccess(null);
+	  setPassError(null);
+	  try {
+		const response = await fetch(`${XANO_BASE_URL}${XANO_ME_PASS}`, {
+		  method: "POST",
+		  headers: { "Content-Type": "application/json" },
+		  body: JSON.stringify({ email: authEmail, Password: newPassword })
+		});
+		if (!response.ok) {
+		  throw new Error("Failed to update password.");
+		}
+		const data = await response.json();
+		setPassSuccess(data ? JSON.stringify(data) : "Password updated successfully."); // you can format this nicer later
+		setNewPassword("");
+	  } catch (err: any) {
+		setPassError(err?.message || "Failed to update password.");
+	  } finally {
+		setIsPassLoading(false);
+	  }
+	};
 
 	if (!mounted) return null;
 
@@ -1063,6 +1093,19 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 								Sign in
 							</button>
 						)}
+					{isAuthenticated && (
+						<button
+							onClick={() => {
+								setShowChangePassModal(true);
+								setPassSuccess(null);
+								setPassError(null);
+								setNewPassword("");
+							}}
+							className="rounded-md bg-purple-600 px-3 py-1.5 ml-2 text-white shadow hover:bg-purple-700"
+						>
+							Change Password
+						</button>
+					)}
 					</div>
 				</div>
 
@@ -1128,7 +1171,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 									</button>
 									{showConsumerTooltip && (
 										<div className="absolute bottom-full left-1/2 mb-2 w-64 -translate-x-1/2 transform rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
-											This is the target endpoint - where the data is sent to or consumed. For example, your client API, webhook or integration endpoint.
+											This is the target endpoint - where the data is sent to or consumed. For example, your client API, webhook or integration endpoint. If you don't have any - fill here the provider URL as well 
 											<div className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
 										</div>
 									)}
@@ -1184,8 +1227,8 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 									value={userCurl}
 									onChange={(e) => setUserCurl(e.target.value)}
 									placeholder={caseType === "B"
-										? "Leave this field as a blank if you want to send a cURL generation request."
-										: "curl -X POST https://api.provider.com/..."}
+										? "Leave this field as a blank if you want to send a cURL generation request. Do not send your own real token in the command "
+										: "curl -X POST https://api.provider.com/...Do not send your own real token in the command"}
 									rows={caseType === "B" ? 3 : 4}
 									className={classNames(
 										"w-full rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
@@ -1774,6 +1817,46 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 							<button
 								onClick={() => setShowPolicyModal(false)}
 								className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+			{showChangePassModal && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+					<div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
+						<div className="mb-4 flex items-center justify-between">
+							<h3 className="text-lg font-semibold text-gray-800">Change Password</h3>
+							<button
+								onClick={() => setShowChangePassModal(false)}
+								className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+							>✕</button>
+						</div>
+						<label className="block mb-4">
+							<span className="block text-sm font-medium text-gray-700 mb-1">New Password</span>
+							<input
+								type="password"
+								value={newPassword}
+								onChange={(e) => setNewPassword(e.target.value)}
+								className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+								autoFocus
+							/>
+						</label>
+						{passError && <div className="mb-2 text-sm text-red-600">{passError}</div>}
+						{passSuccess && <div className="mb-2 text-sm text-green-600">{passSuccess}</div>}
+						<div className="flex gap-2 mt-4">
+							<button
+								onClick={handleChangePassword}
+								disabled={isPassLoading || !newPassword}
+								className={`flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 ${(!newPassword || isPassLoading) ? 'opacity-50 cursor-not-allowed' : ''}`}
+							>
+								{isPassLoading ? 'Updating...' : 'Submit'}
+							</button>
+							<button
+								onClick={() => setShowChangePassModal(false)}
+								className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
 							>
 								Cancel
 							</button>
