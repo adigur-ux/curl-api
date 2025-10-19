@@ -1654,6 +1654,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 								</p>
 								<ul className="mb-4 ml-4 list-disc space-y-1">
 									<li>Incorrect email or password</li>
+									<li>password does not meet minimum length requirement of 8 characters</li>
 									<li>Account not yet activated</li>
 									<li>Server connectivity issues</li>
 									<li>Account suspended or disabled</li>
