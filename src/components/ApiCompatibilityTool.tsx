@@ -374,6 +374,8 @@ export default function ApiCompatibilityTool() {
 	const [agreedToTerms, setAgreedToTerms] = useState(false);
 	const [showContactModal, setShowContactModal] = useState(false);
 	const [showEmailServiceModal, setShowEmailServiceModal] = useState(false);
+	const [showSignupPassInfo, setShowSignupPassInfo] = useState(false);
+	const [signupPassInfoDismissed, setSignupPassInfoDismissed] = useState(false);
 	const [hasTriedToRun, setHasTriedToRun] = useLocalStorageBoolean("api-compat-hasTriedToRun", false);
 
 	const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
@@ -1035,6 +1037,14 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 	  }
 	};
 
+	useEffect(() => {
+		if (authMode === "signup") {
+			setShowSignupPassInfo(true);
+		} else {
+			setShowSignupPassInfo(false);
+		}
+	}, [authMode]);
+
 	if (!mounted) return null;
 
 	return (
@@ -1527,6 +1537,7 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 											setAuthEmail("");
 											setAuthPassword("");
 											setAuthError(null);
+											setSignupPassInfoDismissed(false);
 										}} className="mt-2 text-indigo-600 hover:underline">Need an account? Sign up</button>
 									) : (
 										<button onClick={() => {
@@ -1860,6 +1871,37 @@ const buildPayload = useCallback((): { payload: any; requestId: string } => {
 								className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
 							>
 								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+			{showSignupPassInfo && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">
+						<div className="mb-4 flex items-center justify-between">
+							<h3 className="text-lg font-semibold text-gray-800">Password Requirement</h3>
+							<button onClick={() => { setShowSignupPassInfo(false); }} className="rounded-md p-1 text-gray-500 hover:bg-gray-100">✕</button>
+						</div>
+						<div className="text-sm text-gray-700">
+							<p>The password that you will choose must be at least <strong>8 characters</strong> long.</p>
+							<p className="mt-2">Please read and acknowledge to continue.</p>
+						</div>
+						<div className="mt-4 flex gap-3">
+							<button
+								onClick={() => {
+									setSignupPassInfoDismissed(true);
+									setShowSignupPassInfo(false);
+								}}
+								className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700"
+							>
+								I Understand
+							</button>
+							<button
+								onClick={() => { setShowSignupPassInfo(false); }}
+								className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow hover:bg-gray-50"
+							>
+								Close
 							</button>
 						</div>
 					</div>
