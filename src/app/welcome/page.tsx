@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 
 export default function WelcomePage() {
 	return (
@@ -22,13 +23,13 @@ export default function WelcomePage() {
 							</div>
 							<div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
 								<Link
-									href="/tool"
+									href={"/" as Route}
 									className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-base font-medium text-white shadow hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 								>
 									▶ Start Free
 								</Link>
 								<Link
-									href="/tool"
+									href={"/" as Route}
 									className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-5 py-3 text-base font-medium text-gray-800 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 								>
 									Login
@@ -96,7 +97,7 @@ export default function WelcomePage() {
 					</div>
 					<div className="mt-8">
 						<Link
-							href="/tool"
+							href={"/" as Route}
 							className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-base font-medium text-white shadow hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 						>
 							▶ Start Free (3 runs)
@@ -124,7 +125,7 @@ export default function WelcomePage() {
 						<h2 className="text-3xl font-extrabold text-gray-900">Ready to fix your API?</h2>
 						<div className="mt-6 flex flex-col items-start gap-3 sm:flex-row">
 							<Link
-								href="/tool"
+								href={"/" as Route}
 								className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-base font-medium text-white shadow hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 							>
 								▶ Start Free
