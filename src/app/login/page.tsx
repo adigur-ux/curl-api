@@ -19,6 +19,18 @@ function LoginPageContent() {
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 
+	// If a token already exists, go straight to the tool (home renders tool)
+	useEffect(() => {
+		try {
+			const token = localStorage.getItem(LS_AUTH_TOKEN_KEY);
+			if (token) {
+				router.replace("/");
+			}
+		} catch {
+			// ignore
+		}
+	}, [router]);
+
 	useEffect(() => {
 		if (fromSignup) {
 			setNotice("Account created. Please verify your email, then sign in.");
