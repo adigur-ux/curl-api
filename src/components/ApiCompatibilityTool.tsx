@@ -419,10 +419,6 @@ export default function ApiCompatibilityTool() {
 			setAuthEmail("");
 			setShowAuthModal(true);
 		}
-		// If not authenticated, show login modal
-		if (!isAuthenticated) {
-			setShowAuthModal(true);
-		}
 	}, []); // Only run on mount
 
 	// Function to fetch credits from Xano
